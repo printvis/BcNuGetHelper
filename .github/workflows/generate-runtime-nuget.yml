@@ -127,6 +127,8 @@ jobs:
 
       - name: Wait for Docker
         shell: pwsh
+        env:
+          DOCKER_WAIT: ${{ vars.DOCKER_WAIT }}
         run: |
           . (Join-Path $env:GITHUB_WORKSPACE ".github/scripts/runtime/WaitForDocker.ps1")
 
