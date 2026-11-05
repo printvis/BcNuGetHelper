@@ -192,21 +192,52 @@ function GenerateRuntimeAppFiles {
     $artifacturl = Get-BCArtifactUrl -type $type -country $country -version $artifactVersion -select Closest
     $global:runtimeAppFiles = @{}
     $global:countrySpecificRuntimeAppFiles = @{}
-    Convert-BcAppsToRuntimePackages -containerName $containerName -artifactUrl $artifacturl -imageName '' -apps $apps -publishApps $dependencies -licenseFile $licenseFileUrl -skipVerification -afterEachRuntimeCreation { Param($ht)
+    # Pass an explicit destination folder so we can reliably locate the runtime package afterwards.
+    # Some versions of BcContainerHelper's Convert-BcAppsToRuntimePackages leak the internal
+    # container-side path into the reported runtimeFile (due to an un-suppressed cmdlet output
+    # inside the container script block), resulting in a malformed, non-existent path. Resolving
+    # the file name against our own known destination folder works around that issue.
+    $destinationFolder = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+    New-Item -Path $destinationFolder -ItemType Directory | Out-Null
+    Convert-BcAppsToRuntimePackages -containerName $containerName -artifactUrl $artifacturl -imageName '' -apps $apps -publishApps $dependencies -licenseFile $licenseFileUrl -destinationFolder $destinationFolder -skipVerification -afterEachRuntimeCreation { Param($ht)
         if (-not $ht.runtimeFile) { throw "Could not generate runtime package" }
+        $runtimeFile = Resolve-RuntimeFilePath -runtimeFile $ht.runtimeFile -destinationFolder $destinationFolder
         $appName = [System.IO.Path]::GetFileName($ht.appFile)
-        $global:runtimeAppFiles += @{ $appName = $ht.runtimeFile }
+        $global:runtimeAppFiles += @{ $appName = $runtimeFile }
         $global:countrySpecificRuntimeAppFiles += @{ $appName = @{} }
     } | Out-Null
     foreach($ct in $additionalCountries) {
         $artifacturl = Get-BCArtifactUrl -type $type -country $ct -version $artifactVersion -select Closest
-        Convert-BcAppsToRuntimePackages -containerName $containerName -artifactUrl $artifacturl -imageName '' -apps $apps -publishApps $dependencies -licenseFile $licenseFileUrl -skipVerification -afterEachRuntimeCreation { Param($ht)
+        $ctDestinationFolder = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        New-Item -Path $ctDestinationFolder -ItemType Directory | Out-Null
+        Convert-BcAppsToRuntimePackages -containerName $containerName -artifactUrl $artifacturl -imageName '' -apps $apps -publishApps $dependencies -licenseFile $licenseFileUrl -destinationFolder $ctDestinationFolder -skipVerification -afterEachRuntimeCreation { Param($ht)
             if (-not $ht.runtimeFile) { throw "Could not generate runtime package" }
+            $runtimeFile = Resolve-RuntimeFilePath -runtimeFile $ht.runtimeFile -destinationFolder $ctDestinationFolder
             $appName = [System.IO.Path]::GetFileName($ht.appFile)
-            $global:countrySpecificRuntimeAppFiles."$appName" += @{ $ct = $ht.runtimeFile }
+            $global:countrySpecificRuntimeAppFiles."$appName" += @{ $ct = $runtimeFile }
         } | Out-Null
     }
     return $global:runtimeAppFiles, $global:countrySpecificRuntimeAppFiles
+}
+
+# Works around a BcContainerHelper issue where the reported runtime package path can be a
+# malformed, nested path (e.g. "<destFolder>\C:\dest\<file>\<file>") instead of a simple
+# "<destFolder>\<file>" path. The runtime package is always written as a single file directly
+# inside $destinationFolder, so re-resolving against the file name recovers the real path.
+function Resolve-RuntimeFilePath {
+    Param(
+        [string] $runtimeFile,
+        [string] $destinationFolder
+    )
+    if (Test-Path $runtimeFile) {
+        return $runtimeFile
+    }
+    $resolvedFile = Join-Path $destinationFolder ([System.IO.Path]::GetFileName($runtimeFile))
+    if (-not (Test-Path $resolvedFile)) {
+        throw "Could not locate generated runtime package file. Expected it at '$resolvedFile' (reported path was '$runtimeFile')"
+    }
+    Write-Host "Resolved runtime package path from '$runtimeFile' to '$resolvedFile'"
+    return $resolvedFile
 }
 
 function GetAppFile {
