@@ -70,8 +70,6 @@ jobs:
 
       - name: Mask input
         shell: pwsh
-        env:
-          secrets: ${{ toJson(secrets) }}
         run: |
           . (Join-Path $env:GITHUB_WORKSPACE ".github/scripts/runtime/MaskInput.ps1")
 
@@ -110,8 +108,6 @@ jobs:
 
       - name: Mask input
         shell: pwsh
-        env:
-          secrets: ${{ toJson(secrets) }}
         run: |
           . (Join-Path $env:GITHUB_WORKSPACE ".github/scripts/runtime/MaskInput.ps1")
 
@@ -155,8 +151,6 @@ jobs:
 
       - name: Mask input
         shell: pwsh
-        env:
-          secrets: ${{ toJson(secrets) }}
         run: |
           . (Join-Path $env:GITHUB_WORKSPACE ".github/scripts/runtime/MaskInput.ps1")
 
