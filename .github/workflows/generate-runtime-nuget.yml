@@ -125,6 +125,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Wait for Docker
+        shell: pwsh
+        run: |
+          . (Join-Path $env:GITHUB_WORKSPACE ".github/scripts/runtime/WaitForDocker.ps1")
+
       - name: Generate Runtime NuGet Packages
         shell: pwsh
         env:
