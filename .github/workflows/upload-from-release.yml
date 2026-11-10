@@ -1,0 +1,97 @@
+name: Upload From Release
+
+# Downloads the app(s) attached to a GitHub release in another repository of the same
+# owner and uploads them to the BcNuGetHelper function app. Dispatched by the
+# "Check AppSource Submission And Upload" workflow of the app repositories.
+# Requires the GH_APP_CLIENT_ID variable and GH_APP_PRIVATE_KEY secret (GitHub App
+# installed on the app repositories with Contents: read).
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Repository (name or owner/name) that owns the release
+        required: true
+      tag:
+        description: Release tag to download the apps from
+        required: true
+      appVersion:
+        description: App version to upload (only apps with this version are uploaded; empty = all apps)
+        required: false
+        default: ''
+
+run-name: 'Upload ${{ inputs.repository }} ${{ inputs.tag }} (${{ inputs.appVersion }})'
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: upload-from-release
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve repository
+        id: repo
+        shell: pwsh
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+        run: |
+          $repo = $env:REPOSITORY
+          if ($repo -notmatch '/') { $repo = "$($env:GITHUB_REPOSITORY_OWNER)/$repo" }
+          if ($repo -notmatch '^[\w.-]+/[\w.-]+$') { throw "Invalid repository '$repo'" }
+          if ($repo.Split('/')[0] -ne $env:GITHUB_REPOSITORY_OWNER) { throw "Only repositories owned by $($env:GITHUB_REPOSITORY_OWNER) are allowed" }
+          "full=$repo" >> $env:GITHUB_OUTPUT
+          "name=$($repo.Split('/')[1])" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.repo.outputs.name }}
+          permission-contents: read
+
+      - name: Download apps from release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ steps.repo.outputs.full }}
+          TAG: ${{ inputs.tag }}
+          APP_VERSION: ${{ inputs.appVersion }}
+        run: |
+          New-Item -ItemType Directory -Path release | Out-Null
+          gh release download $env:TAG --repo $env:REPO --pattern '*-Apps-*.zip' --dir release
+          $zips = @(Get-ChildItem release -Filter *.zip)
+          if ($zips.Count -eq 0) { throw "No Apps artifact found on release $($env:TAG) of $($env:REPO)" }
+          $zips | ForEach-Object { Expand-Archive -Path $_.FullName -DestinationPath apps -Force }
+          $apps = @(Get-ChildItem apps -Recurse -Filter *.app)
+          if ($env:APP_VERSION) {
+            $apps = @($apps | Where-Object { $_.Name -like "*_$($env:APP_VERSION).app" })
+          }
+          if ($apps.Count -eq 0) { throw "No .app files found for version '$($env:APP_VERSION)'" }
+          New-Item -ItemType Directory -Path upload | Out-Null
+          $apps | ForEach-Object { Copy-Item $_.FullName upload; Write-Host "Will upload $($_.Name)" }
+
+      - name: Azure login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Upload apps
+        shell: pwsh
+        env:
+          BASE_NAME: ${{ vars.BASE_NAME }}
+        run: |
+          $backend = "https://$($env:BASE_NAME)-func.azurewebsites.net"
+          $token = az account get-access-token --resource https://management.core.windows.net/ --query accessToken -o tsv
+          Write-Host "::add-mask::$token"
+          foreach ($app in Get-ChildItem upload -Filter *.app) {
+            Write-Host "Uploading $($app.Name)"
+            Invoke-RestMethod -Method Post -Uri "$backend/api/upload" -Headers @{ Authorization = "Bearer $token" } -InFile $app.FullName -ContentType 'application/octet-stream' | ConvertTo-Json -Depth 5 | Write-Host
+          }
