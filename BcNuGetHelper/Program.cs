@@ -5,9 +5,12 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var builder = FunctionsApplication.CreateBuilder(args);
-
+builder.Services.Configure<KestrelServerOptions>(o => o.Limits.MaxRequestBodySize = null);
+builder.Services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = long.MaxValue);
 builder.ConfigureFunctionsWebApplication();
 
 builder.Services
