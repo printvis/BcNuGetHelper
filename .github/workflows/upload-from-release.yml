@@ -1,6 +1,6 @@
 name: Upload From Release
 
-# Downloads the app(s) attached to a GitHub release in another repository of the same
+# Downloads the app(s) and their dependency apps attached to a GitHub release in another repository of the same
 # owner and uploads them to the BcNuGetHelper function app. Dispatched by the
 # "Check AppSource Submission And Upload" workflow of the app repositories.
 # Requires the GH_APP_CLIENT_ID variable and GH_APP_PRIVATE_KEY secret (GitHub App
@@ -76,6 +76,20 @@ jobs:
           New-Item -ItemType Directory -Path upload | Out-Null
           $apps | ForEach-Object { Copy-Item $_.FullName upload; Write-Host "Will upload $($_.Name)" }
 
+          # Dependency apps (e.g. the PrintVis base app) are needed to compile the runtime packages
+          New-Item -ItemType Directory -Path release-deps | Out-Null
+          gh release download $env:TAG --repo $env:REPO --pattern '*-Dependencies-*.zip' --dir release-deps
+          $global:LASTEXITCODE = 0
+          $depZips = @(Get-ChildItem release-deps -Filter *.zip)
+          if ($depZips.Count -eq 0) {
+            Write-Host "::warning::No Dependencies artifact found on release $($env:TAG) of $($env:REPO). Runtime packages can't be compiled when the app has non-Microsoft dependencies."
+          }
+          New-Item -ItemType Directory -Path upload-deps | Out-Null
+          $depZips | ForEach-Object { Expand-Archive -Path $_.FullName -DestinationPath deps -Force }
+          if (Test-Path deps) {
+            Get-ChildItem deps -Recurse -Filter *.app | ForEach-Object { Copy-Item $_.FullName upload-deps -Force; Write-Host "Will upload dependency $($_.Name)" }
+          }
+
       - name: Azure login
         uses: azure/login@v3
         with:
@@ -91,7 +105,10 @@ jobs:
           $backend = "https://$($env:BASE_NAME)-func.azurewebsites.net"
           $token = az account get-access-token --resource https://management.core.windows.net/ --query accessToken -o tsv
           Write-Host "::add-mask::$token"
+          $dependencies = @(Get-ChildItem upload-deps -Filter *.app)
           foreach ($app in Get-ChildItem upload -Filter *.app) {
-            Write-Host "Uploading $($app.Name)"
-            Invoke-RestMethod -Method Post -Uri "$backend/api/upload" -Headers @{ Authorization = "Bearer $token" } -InFile $app.FullName -ContentType 'application/octet-stream' | ConvertTo-Json -Depth 5 | Write-Host
+            Write-Host "Uploading $($app.Name) with $($dependencies.Count) dependency app(s)"
+            $form = @{ apps = $app }
+            if ($dependencies.Count -gt 0) { $form.dependencies = $dependencies }
+            Invoke-RestMethod -Method Post -Uri "$backend/api/upload" -Headers @{ Authorization = "Bearer $token" } -Form $form | ConvertTo-Json -Depth 5 | Write-Host
           }
