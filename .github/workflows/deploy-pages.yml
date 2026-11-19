@@ -23,6 +23,9 @@ defaults:
 
 env:
   BASE_NAME: ${{ vars.BASE_NAME }}
+  # Optional custom domain of the function app (e.g. https://feed.example.com). Used for the URLs
+  # shown on the site; defaults to the azurewebsites.net address.
+  FEED_BASE_URL: ${{ vars.FEED_BASE_URL }}
   PUBLIC_FEEDS: ${{ vars.PUBLIC_FEEDS }}
   # When set, its raw JSON overrides site/branding.json.
   BRANDING: ${{ vars.BRANDING }}
@@ -42,8 +45,9 @@ jobs:
       - name: Build site
         run: |
           # Metadata is read anonymously from the public feeds; no credentials needed.
+          $baseUrl = if ($env:FEED_BASE_URL) { $env:FEED_BASE_URL } else { "https://$($env:BASE_NAME)-func.azurewebsites.net" }
           ./site/Build-Site.ps1 `
-            -BaseUrl "https://$($env:BASE_NAME)-func.azurewebsites.net" `
+            -BaseUrl $baseUrl `
             -PublicFeeds "$($env:PUBLIC_FEEDS)" `
             -OutputDir "_site"
 

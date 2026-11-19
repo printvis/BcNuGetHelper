@@ -183,6 +183,7 @@ All settings are configured as repository **secrets** and **variables** (Setting
 | `AZURE_LOCATION` | Yes | — | Azure region to deploy to |
 | `RESOURCE_GROUP_NAME` | No | `<BASE_NAME>-rg` | Name of the resource group (must match the one created in step 2) |
 | `PUBLIC_FEEDS` | No | (empty — all feeds private) | Comma-separated list of feeds served without authentication, e.g. `apps,runtime,symbols` |
+| `FEED_BASE_URL` | No | `https://<BASE_NAME>-func.azurewebsites.net` | Custom domain of the function app (e.g. `https://feed.example.com`), used for the feed and download URLs shown on the [website](#website-github-pages). The domain must already be bound to the function app |
 | `SMTP_HOST` | No | (empty — notifications off) | SMTP server host for access-key change [e-mail notifications](#e-mail-notifications) |
 | `SMTP_PORT` | No | — | SMTP port (e.g. `587` for STARTTLS) |
 | `SMTP_USERNAME` | No | — | SMTP username |
